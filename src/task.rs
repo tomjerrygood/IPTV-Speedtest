@@ -28,6 +28,7 @@ pub async fn run_task(
     state: std::sync::Arc<AppState>,
     workers: usize,
     top_n: usize,
+    per_channel: usize,
     urls: Vec<String>,
 ) {
     if IS_RUNNING
@@ -141,7 +142,7 @@ pub async fn run_task(
 
     // ── Step 6: 构建并写入输出 ────────────────────────────────────
     let update_time = chrono::Local::now();
-    let (m3u8, txt) = build_and_write(all_entries, update_time);
+    let (m3u8, txt) = build_and_write(all_entries, update_time, per_channel);
 
     {
         let mut guard = state.data.write().await;

@@ -11,6 +11,7 @@ static GROUPS: &[&str] = &["央视频道", "卫视频道", "其他频道"];
 pub fn build_and_write(
     all_entries: Vec<Entry>,
     update_time: chrono::DateTime<chrono::Local>,
+    per_channel: usize,
 ) -> (String, String) {
     // ── 按频道名分组 ─────────────────────────────────────────────
     let mut by_name: HashMap<String, Vec<Entry>> = HashMap::new();
@@ -28,11 +29,11 @@ pub fn build_and_write(
             .then(a2.cmp(&b2))
     });
 
-    // ── 每个频道去重、按速度排序并限制输出源数（仅 1 个）──────
+    // ── 每个频道去重、按速度排序并限制输出源数（--per-channel）──
     //     舍弃的源连同其 #EXTINF(台标) 块一并消失，从根上杜绝
     //     "废弃台标对应下一个节目" 的错位问题；
     //     保留源均已通过 probe_stream 有效性验证（SPS/直链）
-    const MAX_PER_CHANNEL: usize = 1;
+    let per_channel = per_channel.max(1);
     for entries in by_name.values_mut() {
         let mut seen = std::collections::HashSet::new();
         entries.retain(|e| seen.insert(e.url.clone()));
@@ -43,7 +44,7 @@ pub fn build_and_write(
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then(a.index.cmp(&b.index))
         });
-        entries.truncate(MAX_PER_CHANNEL);
+        entries.truncate(per_channel);
     }
 
     let ts = update_time.format("%Y-%m-%d %H:%M:%S").to_string();

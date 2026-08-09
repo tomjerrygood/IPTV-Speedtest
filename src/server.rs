@@ -74,7 +74,8 @@ pub async fn handle_force_retest(State(state): State<Arc<AppState>>) -> impl Int
     }
     let workers = state.workers;
     let top_n = state.top_n;
+    let per_channel = state.per_channel;
     let urls = state.urls.clone();
-    tokio::spawn(crate::task::run_task(state, workers, top_n, urls));
+    tokio::spawn(crate::task::run_task(state, workers, top_n, per_channel, urls));
     (StatusCode::OK, Json(json!({"status": "started"})))
 }

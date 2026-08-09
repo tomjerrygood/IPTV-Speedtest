@@ -35,6 +35,10 @@ struct Cli {
     #[arg(long = "top", env = "TOP", default_value_t = 5)]
     top_n: usize,
 
+    /// 每频道最多保留源数（源不稳时播放器可自动切换备胎源；需 >= 2 才有冗余效果）
+    #[arg(long = "per-channel", env = "PER_CHANNEL", default_value_t = 3)]
+    per_channel: usize,
+
     /// 最低速率阈值 (MB/s)，低于此值的节目会被舍弃
     #[arg(long = "speed-low", env = "SPEED_LOW", default_value_t = 5.0)]
     speed_low: f64,
@@ -150,6 +154,7 @@ pub struct AppState {
     pub data: RwLock<SharedData>,
     pub workers: usize,
     pub top_n: usize,
+    pub per_channel: usize,
     pub urls: Vec<String>,
 }
 
@@ -195,8 +200,8 @@ async fn main() {
     });
 
     println!(
-        "IPTV Aggregator v{}  port={}  workers={}  top={}  cron=\"{}\"  tz={}",
-        VERSION, cli.port, cli.workers, cli.top_n, cli.cron, tz
+        "IPTV Aggregator v{}  port={}  workers={}  top={}  per-channel={}  cron=\"{}\"  tz={}",
+        VERSION, cli.port, cli.workers, cli.top_n, cli.per_channel, cli.cron, tz
     );
     println!("Subscribe URLs ({}):", urls.len());
     for (i, u) in urls.iter().enumerate() {
@@ -227,6 +232,7 @@ async fn main() {
         }),
         workers: cli.workers,
         top_n: cli.top_n,
+        per_channel: cli.per_channel.max(1),
         urls: urls.clone(),
     });
 
@@ -240,15 +246,15 @@ async fn main() {
         println!("[main] no cache found, running initial speed-test immediately.");
         let st = state.clone();
         let us = urls.clone();
-        let (w, t) = (cli.workers, cli.top_n);
-        tokio::spawn(async move { task::run_task(st, w, t, us).await });
+        let (w, t, pc) = (cli.workers, cli.top_n, cli.per_channel);
+        tokio::spawn(async move { task::run_task(st, w, t, pc, us).await });
     }
 
     // ── Cron 调度循环 ─────────────────────────────────────────────
     {
         let st = state.clone();
         let us = urls.clone();
-        let (w, t) = (cli.workers, cli.top_n);
+        let (w, t, pc) = (cli.workers, cli.top_n, cli.per_channel.max(1));
 
         tokio::spawn(async move {
             loop {
@@ -279,7 +285,7 @@ async fn main() {
                 println!("[cron] triggered — starting speed-test...");
                 let st2 = st.clone();
                 let us2 = us.clone();
-                tokio::spawn(task::run_task(st2, w, t, us2));
+                tokio::spawn(task::run_task(st2, w, t, pc, us2));
             }
         });
     }
