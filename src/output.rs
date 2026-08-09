@@ -35,15 +35,21 @@ pub fn build_and_write(
     //     保留源均已通过 probe_stream 有效性验证（SPS/直链）
     let per_channel = per_channel.max(1);
     for entries in by_name.values_mut() {
+        // 1) URL 完全去重
         let mut seen = std::collections::HashSet::new();
         entries.retain(|e| seen.insert(e.url.clone()));
-        // 按速度降序，速度相同则按 index 升序
+        // 2) 按速度降序，速度相同则按 index 升序
         entries.sort_by(|a, b| {
             b.speed
                 .partial_cmp(&a.speed)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then(a.index.cmp(&b.index))
         });
+        // 3) 按主机去重：同一频道内每台主机只保留最快的一个源。
+        //    保证 per_channel 个备胎源来自不同主机——单台主机整体错频/失效时
+        //    其余主机源仍正确；否则 3 个备胎可能全来自同一错频主机导致台标错乱
+        let mut seen_hosts = std::collections::HashSet::new();
+        entries.retain(|e| seen_hosts.insert(host_of_url(&e.url)));
         entries.truncate(per_channel);
     }
 
@@ -115,6 +121,14 @@ pub fn build_and_write(
         all_names.len()
     );
     (m3u8, txt)
+}
+
+/// 提取 URL 主机名；解析失败时用完整 URL 作为 key（保证不同 URL 互不去重）
+fn host_of_url(url: &str) -> String {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_string()))
+        .unwrap_or_else(|| url.to_string())
 }
 
 /// 读取缓存文件

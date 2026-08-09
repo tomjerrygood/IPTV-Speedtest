@@ -1,8 +1,9 @@
 name: Build Android (S905)
 
 on:
-  # 推送 v* 标签时自动构建并发布到 GitHub Release
+  # 推送到 main 时自动构建（Artifacts 供下载验证）
   push:
+    branches: [ 'main' ]
     tags: [ 'v*' ]
   # 也可在 Actions 页面手动触发构建
   workflow_dispatch:
@@ -93,10 +94,15 @@ jobs:
           cp ANDROID-S905.md dist/iptv-speed-tester-armv7/ 2>/dev/null || true
           cp LICENSE* dist/iptv-speed-tester-armv7/ 2>/dev/null || true
 
+          # GitHub runner 时区为 UTC，将文件 mtime 调 +8h，
+          # 使 zip 时间字段显示为上海本地时间（盒子上解压不再差 8 小时）
+          find dist/iptv-speed-tester-armv7 -type f -exec touch -m -d "+8 hours" {} +
+
           # 不再手动打 zip：upload-artifact 直接上传目录，
           # GitHub 侧会打成一枚一级 zip，下载解压后直接得到 iptv 二进制
           #（避免 v4 先用手打 zip 再被外层再包一次导致两次解压）
-          ls -lhR dist/
+          echo "--- dist dir (Shanghai-adjusted mtimes) ---"
+          ls -lhR --full-time dist/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -129,9 +135,11 @@ jobs:
         run: |
           set -euo pipefail
           cd release-artifacts
+          # 同样把文件时间调成上海本地时间
+          find . -type f -exec touch -m -d "+8 hours" {} +
           zip -r iptv-speed-tester-armv7.zip . -x "*.zip"
           cd ..
-          ls -lh release-artifacts
+          ls -lh --full-time release-artifacts
 
       - name: Create / update release
         uses: softprops/action-gh-release@v2

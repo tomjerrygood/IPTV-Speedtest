@@ -40,7 +40,7 @@ struct Cli {
     per_channel: usize,
 
     /// 最低速率阈值 (MB/s)，低于此值的节目会被舍弃
-    #[arg(long = "speed-low", env = "SPEED_LOW", default_value_t = 2.0)]
+    #[arg(long = "speed-low", env = "SPEED_LOW", default_value_t = 1.0)]
     speed_low: f64,
 
     /// 最低分辨率（高度像素，如 1080=FHD）：仅保留源信息中分辨率为该值及以上的节目。

@@ -26,7 +26,7 @@ pub const SPEED_HIGH: f64 = 5.0;
 pub const SPEED_MID: f64 = 1.0;
 
 // 最低速率阈值默认值 (MB/s)：低于此值的源/节目会被舍弃
-pub const DEFAULT_SPEED_LOW: f64 = 2.0;
+pub const DEFAULT_SPEED_LOW: f64 = 1.0;
 
 // 最低速率阈值 (MB/s)，由 CLI 参数 --speed-low 设置，运行前初始化一次
 static SPEED_LOW: OnceLock<f64> = OnceLock::new();
