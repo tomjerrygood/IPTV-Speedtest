@@ -12,7 +12,9 @@ use regex::Regex;
 use reqwest::Client;
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Semaphore;
 use url::Url;
 
 static IS_RUNNING: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
@@ -118,7 +120,26 @@ pub async fn run_task(
         return;
     }
 
-    // ── Step 5: 构建并写入输出 ────────────────────────────────────
+    // ── Step 5: 按分辨率过滤（可选，--min-resolution）─────────────
+    let min_res = crate::config::min_resolution();
+    if min_res > 0 {
+        let before = all_entries.len();
+        all_entries = filter_entries_by_resolution(all_entries, min_res).await;
+        println!(
+            "[task] resolution filter (>= {}p): kept {} / dropped {}",
+            min_res,
+            all_entries.len(),
+            before - all_entries.len()
+        );
+    }
+
+    if all_entries.is_empty() {
+        println!("[task] no entries after filtering, keeping cache");
+        IS_RUNNING.store(false, Ordering::Release);
+        return;
+    }
+
+    // ── Step 6: 构建并写入输出 ────────────────────────────────────
     let update_time = chrono::Local::now();
     let (m3u8, txt) = build_and_write(all_entries, update_time);
 
@@ -222,6 +243,44 @@ fn build_entries(
 
 static RE_URL: Lazy<Regex> = Lazy::new(|| Regex::new(r"(http://[^\s]+)").unwrap());
 static RE_ID: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*\d+\s+").unwrap());
+
+/// 按最低分辨率过滤节目：仅保留源信息中分辨率高度 >= min_h 的节目。
+/// 源信息中探测不到分辨率的节目默认保留（避免误杀），返回过滤后的列表。
+async fn filter_entries_by_resolution(entries: Vec<Entry>, min_h: u32) -> Vec<Entry> {
+    use crate::speedtest::probe_resolution;
+
+    let total = entries.len();
+    let sem = Arc::new(Semaphore::new(32));
+    let mut handles = Vec::with_capacity(total);
+    for (i, e) in entries.iter().enumerate() {
+        let url = e.url.clone();
+        let sem = sem.clone();
+        handles.push((
+            i,
+            tokio::spawn(async move {
+                let _permit = sem.acquire().await.unwrap();
+                probe_resolution(&url).await
+            }),
+        ));
+    }
+
+    let mut kept = Vec::with_capacity(total);
+    let mut dropped = 0usize;
+    for (i, h) in handles {
+        match h.await.ok().flatten() {
+            Some((_w, hgt)) if hgt < min_h => dropped += 1,
+            Some(_) => kept.push(entries[i].clone()), // 分辨率达标
+            None => kept.push(entries[i].clone()),    // 无分辨率信息，默认保留
+        }
+    }
+    let _ = total;
+    println!(
+        "[task] resolution probe done: kept {} / dropped {}",
+        kept.len(),
+        dropped
+    );
+    kept
+}
 
 fn process_hsmdtv_channels(
     host: &str,

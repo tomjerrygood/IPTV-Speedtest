@@ -264,6 +264,55 @@ async fn test_zhgxtv(host: &str, deadline: Instant, fetch_ch: bool) -> (f64, Vec
     (speed, channels)
 }
 
+// ── 分辨率探测 ───────────────────────────────────────────────────
+
+/// 探测 HLS 主播放列表的最大分辨率 (RESOLUTION=WxH)，返回 (宽, 高)。
+///
+/// 仅当 URL 指向 master playlist 且含 `#EXT-X-STREAM-INF:...RESOLUTION=...` 时
+/// 才能精准获得；单码率 media playlist 或非 HLS 源（flv/ts 直链）的源信息中
+/// 没有分辨率字段，返回 None。
+pub async fn probe_resolution(url: &str) -> Option<(u32, u32)> {
+    // 非 HLS 直链（flv/ts 等）跳过探测，避免整段下载浪费时间
+    let lower = url.to_lowercase();
+    if !(lower.contains(".m3u8") || lower.contains("/hls/") || lower.contains("/live/")) {
+        return None;
+    }
+    let client = make_client(Duration::from_secs(4));
+    let resp = client.get(url).send().await.ok()?;
+    if resp.status() != 200 {
+        return None;
+    }
+    let body = resp.text().await.ok()?;
+    if !body.contains("#EXT-X-STREAM-INF") {
+        return None;
+    }
+    let mut best: Option<(u32, u32)> = None;
+    for line in body.lines() {
+        if !line.contains("RESOLUTION=") {
+            continue;
+        }
+        let Some(idx) = line.find("RESOLUTION=") else {
+            continue;
+        };
+        let after = &line[idx + "RESOLUTION=".len()..];
+        let value: String = after
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == 'x')
+            .collect();
+        let mut it = value.splitn(2, 'x');
+        let (Ok(w), Ok(h)) = (
+            it.next().unwrap_or("").parse::<u32>(),
+            it.next().unwrap_or("").parse::<u32>(),
+        ) else {
+            continue;
+        };
+        if best.is_none() || w * h > best.unwrap().0 * best.unwrap().1 {
+            best = Some((w, h));
+        }
+    }
+    best
+}
+
 // ── 公开接口 ──────────────────────────────────────────────────────
 
 /// 测试单个 API 主机

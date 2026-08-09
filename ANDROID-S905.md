@@ -56,11 +56,13 @@ chmod 755 /data/iptv
 
 # 3. 运行（默认端口 3030，每天 03:23 自动测速）
 #    舍弃速率低于 5MB/s 的节目（--speed-low 默认即 5.0，可调）
-/data/iptv --port 3030 --workers 20 --top 5 --cron "23 3 * * *" --timezone Asia/Shanghai --speed-low 5.0
+#    舍弃低于 FHD(1080p) 的节目（--min-resolution 1080，可选）
+/data/iptv --port 3030 --workers 20 --top 5 --cron "23 3 * * *" --timezone Asia/Shanghai --speed-low 5.0 --min-resolution 1080
 ```
 
 > 盒子 CPU 较弱，建议 `--workers` 保持 10~20，避免过载。
 > `--speed-low <MB/s>` 设置最低速率阈值：测速后低于该值的节目会被舍弃。例如只要 ≥3MB/s 源：`--speed-low 3.0`；只要超清源：`--speed-low 10.0`。
+> `--min-resolution <高度>` 按分辨率过滤：`1080`=只保留 FHD(1080p) 及以上，`720`=只保留 HD 及以上，`2160`=只保留 4K。分辨率来自 HLS 主播放列表的 `RESOLUTION` 属性；源信息中无分辨率的节目默认保留（避免误杀）。
 
 ### 开机自启（可选）
 

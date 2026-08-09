@@ -41,6 +41,22 @@ pub fn speed_low() -> f64 {
     *SPEED_LOW.get().unwrap_or(&DEFAULT_SPEED_LOW)
 }
 
+// 最低分辨率阈值默认值（0 = 关闭）
+pub const DEFAULT_MIN_RESOLUTION: u32 = 0;
+
+// 最低分辨率阈值（高度像素），由 CLI 参数 --min-resolution 设置，运行前初始化一次
+static MIN_RESOLUTION: OnceLock<u32> = OnceLock::new();
+
+/// 初始化最低分辨率阈值，main() 解析参数后调用一次
+pub fn init_min_resolution(v: u32) {
+    let _ = MIN_RESOLUTION.set(v);
+}
+
+/// 当前最低分辨率阈值（高度像素，0 = 关闭）。仅保留源信息中分辨率为该值及以上的节目。
+pub fn min_resolution() -> u32 {
+    *MIN_RESOLUTION.get().unwrap_or(&DEFAULT_MIN_RESOLUTION)
+}
+
 // 超时 / 批次
 pub const HOST_TIMEOUT: Duration = Duration::from_secs(15);
 pub const SUB_TIMEOUT: Duration = Duration::from_secs(10);
