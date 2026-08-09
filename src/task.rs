@@ -244,8 +244,9 @@ fn build_entries(
 static RE_URL: Lazy<Regex> = Lazy::new(|| Regex::new(r"(http://[^\s]+)").unwrap());
 static RE_ID: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*\d+\s+").unwrap());
 
-/// 按最低分辨率过滤节目：仅保留源信息中分辨率高度 >= min_h 的节目。
-/// 源信息中探测不到分辨率的节目默认保留（避免误杀），返回过滤后的列表。
+/// 按最低分辨率过滤节目：仅保留分辨率高度 >= min_h 的节目。
+/// - HLS 源探测失败（master 无 RESOLUTION 属性且 TS SPS 解析失败）即剔除
+/// - 非 HLS 直链（flv/ts）源信息中无分辨率字段，默认保留
 async fn filter_entries_by_resolution(entries: Vec<Entry>, min_h: u32) -> Vec<Entry> {
     use crate::speedtest::probe_resolution;
 
@@ -267,10 +268,15 @@ async fn filter_entries_by_resolution(entries: Vec<Entry>, min_h: u32) -> Vec<En
     let mut kept = Vec::with_capacity(total);
     let mut dropped = 0usize;
     for (i, h) in handles {
+        let is_hls = {
+            let u = entries[i].url.to_lowercase();
+            u.contains(".m3u8") || u.contains("/hls/") || u.contains("/live/")
+        };
         match h.await.ok().flatten() {
             Some((_w, hgt)) if hgt < min_h => dropped += 1,
             Some(_) => kept.push(entries[i].clone()), // 分辨率达标
-            None => kept.push(entries[i].clone()),    // 无分辨率信息，默认保留
+            None if is_hls => dropped += 1,            // HLS 源探测失败，严格剔除
+            None => kept.push(entries[i].clone()),     // 非 HLS 直链无分辨率字段，保留
         }
     }
     let _ = total;

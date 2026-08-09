@@ -266,26 +266,171 @@ async fn test_zhgxtv(host: &str, deadline: Instant, fetch_ch: bool) -> (f64, Vec
 
 // ── 分辨率探测 ───────────────────────────────────────────────────
 
-/// 探测 HLS 主播放列表的最大分辨率 (RESOLUTION=WxH)，返回 (宽, 高)。
-///
-/// 仅当 URL 指向 master playlist 且含 `#EXT-X-STREAM-INF:...RESOLUTION=...` 时
-/// 才能精准获得；单码率 media playlist 或非 HLS 源（flv/ts 直链）的源信息中
-/// 没有分辨率字段，返回 None。
-pub async fn probe_resolution(url: &str) -> Option<(u32, u32)> {
-    // 非 HLS 直链（flv/ts 等）跳过探测，避免整段下载浪费时间
-    let lower = url.to_lowercase();
-    if !(lower.contains(".m3u8") || lower.contains("/hls/") || lower.contains("/live/")) {
+/// 从 H.264 比特流中读取 1 bit
+struct BitReader<'a> {
+    data: &'a [u8],
+    bit_pos: usize,
+}
+
+impl<'a> BitReader<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        BitReader { data, bit_pos: 0 }
+    }
+    fn read_bit(&mut self) -> u32 {
+        if self.bit_pos >= self.data.len() * 8 {
+            return 0;
+        }
+        let byte = self.data[self.bit_pos / 8];
+        let shift = 7 - (self.bit_pos % 8);
+        self.bit_pos += 1;
+        ((byte >> shift) & 1) as u32
+    }
+    fn read_bits(&mut self, n: u32) -> u32 {
+        let mut v = 0u32;
+        for _ in 0..n {
+            v = (v << 1) | self.read_bit();
+        }
+        v
+    }
+}
+
+/// Exp-Golomb 无符号指数哥伦布编码
+fn read_ue(r: &mut BitReader) -> u32 {
+    let mut zeros = 0u32;
+    while r.read_bit() == 0 {
+        zeros += 1;
+        if zeros > 31 {
+            return 0;
+        }
+    }
+    if zeros == 0 {
+        return 0;
+    }
+    let info = r.read_bits(zeros);
+    (1u32 << zeros) - 1 + info
+}
+
+/// Exp-Golomb 有符号指数哥伦布编码
+fn read_se(r: &mut BitReader) -> i32 {
+    let u = read_ue(r);
+    if u & 1 == 1 {
+        ((u + 1) / 2) as i32
+    } else {
+        -((u / 2) as i32)
+    }
+}
+
+/// 解析 H.264 SPS NAL 内容（不含 start code 与 NAL header 0x67）→ (宽, 高)
+fn parse_h264_sps(sps: &[u8]) -> Option<(u32, u32)> {
+    if sps.len() < 4 {
         return None;
     }
-    let client = make_client(Duration::from_secs(4));
-    let resp = client.get(url).send().await.ok()?;
-    if resp.status() != 200 {
+    let profile_idc = sps[0];
+    let mut r = BitReader::new(&sps[3..]);
+
+    let _seq_parameter_set_id = read_ue(&mut r);
+
+    let high_profile = matches!(
+        profile_idc,
+        100 | 110 | 122 | 244 | 44 | 83 | 86 | 118 | 128 | 138 | 139 | 134 | 135
+    );
+    let chroma_format_idc = if high_profile {
+        let c = read_ue(&mut r);
+        if c == 3 {
+            let _separate_colour_plane_flag = r.read_bit();
+        }
+        let _bit_depth_luma_minus8 = read_ue(&mut r);
+        let _bit_depth_chroma_minus8 = read_ue(&mut r);
+        let _qpprime_y_zero_transform_bypass = r.read_bit();
+        let scaling_matrix_present = r.read_bit();
+        if scaling_matrix_present > 0 {
+            let n = if c == 3 { 12 } else { 8 };
+            for i in 0..n {
+                let flag = r.read_bit();
+                if flag > 0 {
+                    let size = if i < 6 { 16 } else { 64 };
+                    let mut last = 8i32;
+                    let mut next = 8i32;
+                    for _ in 0..size {
+                        if next != 0 {
+                            let delta = read_se(&mut r);
+                            next = (last + delta).clamp(0, 255);
+                            last = next;
+                        }
+                    }
+                }
+            }
+        }
+        c
+    } else {
+        1 // 默认 4:2:0
+    };
+
+    let _log2_max_frame_num_minus4 = read_ue(&mut r);
+    let pic_order_cnt_type = read_ue(&mut r);
+    if pic_order_cnt_type == 0 {
+        let _log2_max_poc_lsb_minus4 = read_ue(&mut r);
+    } else if pic_order_cnt_type == 1 {
+        let _delta_pic_order_always_zero = r.read_bit();
+        let _offset_for_non_ref_pic = read_se(&mut r);
+        let _offset_for_top_to_bottom = read_se(&mut r);
+        let n = read_ue(&mut r);
+        for _ in 0..n {
+            let _off = read_se(&mut r);
+        }
+    }
+    let _max_num_ref_frames = read_ue(&mut r);
+    let _gaps_in_frame_num = r.read_bit();
+
+    let pic_width_mbs = read_ue(&mut r);
+    let mut width = (pic_width_mbs + 1) * 16;
+
+    let pic_height_map_units = read_ue(&mut r);
+    let frame_mbs_only = r.read_bit();
+    let height_mbs = (2 - frame_mbs_only) * (pic_height_map_units + 1);
+    let mut height = height_mbs * 16;
+
+    if frame_mbs_only == 0 {
+        let _mb_adaptive_frame_field = r.read_bit();
+    }
+    let _direct_8x8 = r.read_bit();
+
+    // frame_cropping（剔除黑边），chroma 4:2:0 时 CropUnit=2
+    if r.read_bit() > 0 {
+        let crop_left = read_ue(&mut r);
+        let crop_right = read_ue(&mut r);
+        let crop_top = read_ue(&mut r);
+        let crop_bottom = read_ue(&mut r);
+        let crop_unit = if chroma_format_idc == 0 { 1 } else { 2 };
+        width = width.saturating_sub((crop_left + crop_right) * crop_unit);
+        height = height.saturating_sub((crop_top + crop_bottom) * crop_unit);
+    }
+
+    if width == 0 || height == 0 {
         return None;
     }
-    let body = resp.text().await.ok()?;
-    if !body.contains("#EXT-X-STREAM-INF") {
-        return None;
+    Some((width, height))
+}
+
+/// 在字节流中定位 00 00 01 或 00 00 00 01 起始码，返回 (起始码长度, NAL 头位置)
+fn find_start_code(buf: &[u8], from: usize) -> Option<(usize, usize)> {
+    let mut i = from;
+    while i + 3 <= buf.len() {
+        if buf[i] == 0 && buf[i + 1] == 0 {
+            if buf[i + 2] == 1 {
+                return Some((3, i + 3));
+            }
+            if i + 4 <= buf.len() && buf[i + 2] == 0 && buf[i + 3] == 1 {
+                return Some((4, i + 4));
+            }
+        }
+        i += 1;
     }
+    None
+}
+
+/// 解析 master playlist 的 RESOLUTION 属性，返回最大档位
+fn parse_master_resolution(body: &str) -> Option<(u32, u32)> {
     let mut best: Option<(u32, u32)> = None;
     for line in body.lines() {
         if !line.contains("RESOLUTION=") {
@@ -311,6 +456,174 @@ pub async fn probe_resolution(url: &str) -> Option<(u32, u32)> {
         }
     }
     best
+}
+
+/// 解析单码率 media playlist：下载 TS 分片，做 TS 解复用后解析 H.264 SPS 获取真实分辨率
+async fn probe_resolution_from_ts(url: &str, playlist: &str) -> Option<(u32, u32)> {
+    use futures_util::StreamExt;
+
+    let ts_url = {
+        let parsed = Url::parse(url).ok()?;
+        let origin = format!("{}://{}", parsed.scheme(), parsed.host_str()?);
+        let base = &url[..url.rfind('/')? + 1];
+        let mut found = None;
+        for line in playlist.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            found = Some(if line.starts_with("http") {
+                line.to_string()
+            } else if line.starts_with('/') {
+                format!("{}{}", origin, line)
+            } else {
+                format!("{}{}", base, line)
+            });
+            break;
+        }
+        found?
+    };
+
+    // 只下载前 1MB（SPS 位于首个 GOP 开头）
+    let client = make_client(Duration::from_secs(6));
+    let resp = client.get(&ts_url).send().await.ok()?;
+    if resp.status() >= reqwest::StatusCode::BAD_REQUEST {
+        return None;
+    }
+    let mut buf = Vec::with_capacity(1024 * 1024);
+    let mut stream = resp.bytes_stream();
+    while buf.len() < 1024 * 1024 {
+        match tokio::time::timeout(Duration::from_secs(3), stream.next()).await {
+            Ok(Some(Ok(chunk))) => buf.extend_from_slice(&chunk),
+            _ => break,
+        }
+    }
+    if buf.len() < 188 * 2 {
+        return None;
+    }
+
+    // TS 同步：找到两个连续 0x47 包
+    let mut sync = None;
+    for i in 0..buf.len() - 376 {
+        if buf[i] == 0x47 && buf[i + 188] == 0x47 {
+            sync = Some(i);
+            break;
+        }
+    }
+    let mut pos = sync?;
+
+    // 遍历 TS 包：定位 PUSI（payload 起始）包，在其 payload 中找 H.264 SPS（NAL type 7）
+    while pos + 188 <= buf.len() {
+        if buf[pos] != 0x47 {
+            // 失步，重新同步
+            if pos >= buf.len().saturating_sub(376) {
+                return None;
+            }
+            sync = None;
+            for i in pos..buf.len() - 376 {
+                if buf[i] == 0x47 && buf[i + 188] == 0x47 {
+                    sync = Some(i);
+                    break;
+                }
+            }
+            let Some(s) = sync else { return None };
+            pos = s;
+            continue;
+        }
+        let b1 = buf[pos + 1];
+        let b3 = buf[pos + 3];
+        let pusi = b1 & 0x40 != 0;
+        let has_af = b3 & 0x20 != 0;
+        let has_payload = b3 & 0x10 != 0;
+        let af_len = if has_af {
+            buf.get(pos + 4).copied().unwrap_or(0) as usize
+        } else {
+            0
+        };
+        let payload_start = pos + 4 + af_len;
+        if pusi && has_payload && payload_start < pos + 188 {
+            let window = &buf[payload_start..(pos + 188).min(buf.len())];
+            // 窗口内循环查找 SPS 起始码；PES 头（00 00 01 E0）会被低 5 位检查排除
+            let mut find_from = 0usize;
+            loop {
+                let Some((_, nal_start)) = find_start_code(window, find_from) else {
+                    break;
+                };
+                let Some(&nal_byte) = window.get(nal_start) else {
+                    break;
+                };
+                if nal_byte & 0x1f != 7 {
+                    find_from = nal_start + 1;
+                    continue;
+                }
+                // 拼接 SPS：本包剩余 + 后续包直至遇到新起始码或满 192 字节
+                let mut sps = window[nal_start + 1..].to_vec();
+                let mut p2 = pos + 188;
+                while sps.len() < 192 && p2 + 188 <= buf.len() {
+                    let b3b = buf[p2 + 3];
+                    let has_afb = b3b & 0x20 != 0;
+                    let afb = if has_afb {
+                        buf.get(p2 + 4).copied().unwrap_or(0) as usize
+                    } else {
+                        0
+                    };
+                    let pl = p2 + 4 + afb;
+                    if pl < buf.len() {
+                        // 下一包 payload 起始是新起始码则停止（SPS 已结束）
+                        let a = buf.get(pl).copied().unwrap_or(0);
+                        let b = buf.get(pl + 1).copied().unwrap_or(0);
+                        let c = buf.get(pl + 2).copied().unwrap_or(0);
+                        let d = buf.get(pl + 3).copied().unwrap_or(0);
+                        if (a == 0 && b == 0 && c == 1)
+                            || (a == 0 && b == 0 && c == 0 && d == 1)
+                        {
+                            break;
+                        }
+                        let end = (p2 + 188).min(buf.len());
+                        sps.extend_from_slice(&buf[pl..end]);
+                    }
+                    p2 += 188;
+                }
+                if sps.len() >= 4 {
+                    if let Some(r) = parse_h264_sps(&sps) {
+                        return Some(r);
+                    }
+                }
+                // 解析失败（可能拼到错误 NAL），尝试窗口内下一个候选
+                find_from = nal_start + 1;
+            }
+        }
+        pos += 188;
+    }
+    None
+}
+
+/// 探测节目真实分辨率 (宽, 高)。
+///
+/// 两级探测：
+/// 1. master playlist：`#EXT-X-STREAM-INF:...RESOLUTION=WxH`（多码率精确属性）
+/// 2. 单码率 media playlist：下载首个 TS 分片头部，解析 H.264 SPS 还原分辨率
+///
+/// 非 HLS 直链（flv/ts）或无法解析的返回 None。
+pub async fn probe_resolution(url: &str) -> Option<(u32, u32)> {
+    // 非 HLS 直链（flv/ts 等）跳过探测，避免整段下载浪费时间
+    let lower = url.to_lowercase();
+    if !(lower.contains(".m3u8") || lower.contains("/hls/") || lower.contains("/live/")) {
+        return None;
+    }
+    let client = make_client(Duration::from_secs(4));
+    let resp = client.get(url).send().await.ok()?;
+    if resp.status() != 200 {
+        return None;
+    }
+    let body = resp.text().await.ok()?;
+
+    // 1) master playlist：直接取 RESOLUTION 属性
+    if body.contains("#EXT-X-STREAM-INF") {
+        return parse_master_resolution(&body);
+    }
+    // 2) 单码率 media playlist：解析 TS 分片 SPS
+    probe_resolution_from_ts(url, &body).await
 }
 
 // ── 公开接口 ──────────────────────────────────────────────────────
