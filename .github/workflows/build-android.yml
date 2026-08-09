@@ -11,17 +11,38 @@ jobs:
   build-android:
     name: Build iptv-speed-tester-armv7 (32-bit)
     runs-on: ubuntu-latest
+    env:
+      NDK_VER: r26d
+      NDK_DIR: android-ndk-r26d
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Android NDK
-        uses: nttld/setup-ndk@v1
+      # 缓存解压后的 NDK（约 1.5GB），命中则跳过下载
+      - name: Cache Android NDK
+        id: ndk-cache
+        uses: actions/cache@v4
         with:
-          ndk-version: r26d
-          # 将 NDK 的 clang 工具链加入 PATH，供 .cargo/config.toml 的 linker 使用
-          add-to-path: true
-          local-cache: true
+          path: android-ndk-r26d
+          key: android-ndk-r26d-linux-x64
+
+      # 固定 URL 自下载 NDK，路径完全确定，不依赖第三方 action 的 PATH 行为
+      - name: Download & extract Android NDK (if not cached)
+        if: steps.ndk-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          curl -fL -o ndk.zip "https://dl.google.com/android/repository/${NDK_DIR}-linux.zip"
+          unzip -q ndk.zip
+          rm -f ndk.zip
+          test -x "${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang"
+
+      # 把 NDK 路径写入 GITHUB_ENV / GITHUB_PATH，供后续 step 运行时使用。
+      # 注意: 禁止用 ${{ env.ANDROID_NDK_HOME }} —— 它在 workflow 编译期求值恒为空。
+      - name: Configure NDK environment
+        run: |
+          set -euo pipefail
+          echo "ANDROID_NDK_HOME=$GITHUB_WORKSPACE/${NDK_DIR}" >> "$GITHUB_ENV"
+          echo "$GITHUB_WORKSPACE/${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
 
       - name: Install Rust target
         uses: dtolnay/rust-toolchain@stable
@@ -36,21 +57,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          # nttld/setup-ndk 的 add-to-path 已把 NDK clang 加入 PATH。
-          # 这里在运行时用 command -v 反查真实路径（不能用 ${{ env.ANDROID_NDK_HOME }}，
-          # 它会在 workflow 编译期求值且此时尚未设置，导致空路径 /toolchains/...）。
-          CLANG="$(command -v armv7a-linux-androideabi24-clang)"
-          if [[ -z "$CLANG" ]]; then
-            echo "::error::找不到 NDK clang，请检查 nttld/setup-ndk 的 add-to-path"
-            exit 1
-          fi
-          NDK_BIN="$(dirname "$CLANG")"
-          echo "NDK_BIN=$NDK_BIN"
-          ls "$NDK_BIN" | grep -E 'armv7a-linux-androideabi24-clang|llvm-ar' || true
+          # 运行时读取 shell 环境变量（由上一 step 的 GITHUB_ENV 写入）
+          NDK_BIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}"
+          test -x "$NDK_BIN/armv7a-linux-androideabi24-clang" \
+            || { echo "::error::NDK clang 不存在: $NDK_BIN/armv7a-linux-androideabi24-clang"; exit 1; }
+          test -x "$NDK_BIN/llvm-ar" \
+            || { echo "::error::NDK llvm-ar 不存在"; exit 1; }
 
           # cc-rs 通过 CC_<target> / AR_<target> (target 中 - 变 _、转大写) 查找
           # 交叉 C 编译器，用于编译 ring 等含 C/汇编代码的依赖。
-          export CC_armv7_linux_androideabi="$CLANG"
+          export CC_armv7_linux_androideabi="$NDK_BIN/armv7a-linux-androideabi24-clang"
           export AR_armv7_linux_androideabi="$NDK_BIN/llvm-ar"
 
           echo "::group::Cargo build"
@@ -80,9 +97,7 @@ jobs:
           cd dist
           zip -r iptv-speed-tester-armv7.zip iptv-speed-tester-armv7
           cd ..
-
-      - name: Show build result
-        run: ls -lh dist/
+          ls -lh dist/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
