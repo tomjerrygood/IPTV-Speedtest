@@ -5,12 +5,14 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-# 禁用 default-tls（openssl），改用纯 Rust 的 rustls，交叉编译无需系统 OpenSSL
+# 关闭rust‑tls，使用系统DNS、系统SSL
 reqwest = { version = "0.11", default-features = false, features = [
     "json",
     "stream",
-    "rustls-tls",
+    "native-tls",
+    "system-resolver"
 ] }
+
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 clap = { version = "4", features = ["derive", "env"] }
