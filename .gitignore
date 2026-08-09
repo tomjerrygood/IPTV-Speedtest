@@ -1,0 +1,14 @@
+/target
+/dist
+*.zip
+
+# 运行时生成的数据
+sub_cache_*.txt
+iptv_sources.m3u8
+iptv_sources.txt
+
+# 系统 / 编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

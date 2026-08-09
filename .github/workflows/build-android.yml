@@ -1,0 +1,112 @@
+name: Build Android (S905)
+
+on:
+  # 推送 v* 标签时自动构建并发布到 GitHub Release
+  push:
+    tags: [ 'v*' ]
+  # 也可在 Actions 页面手动触发构建
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    name: Build ${{ matrix.artifact }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # S905 盒子：Android 7.1~9.0 绝大多数为 32 位系统 → armv7
+          - target: armv7-linux-androideabi
+            artifact: iptv-speed-tester-armv7
+          # 64 位 Android 9 的 S905 盒子也可运行
+          - target: aarch64-linux-android
+            artifact: iptv-speed-tester-arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+          # 将 NDK 的 clang 工具链加入 PATH，供 .cargo/config.toml 的 linker 使用
+          add-to-path: true
+          local-cache: true
+
+      - name: Install Rust target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+
+      - name: Build release binary for ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+
+          echo "::group::Cargo build (${{ matrix.target }})"
+          cargo build --locked \
+            --release \
+            --no-default-features \
+            --features android \
+            --target ${{ matrix.target }}
+          echo "::endgroup::"
+
+          BIN=target/${{ matrix.target }}/release/iptv-speed-tester
+
+          # NDK 的 strip 进一步瘦身（release profile 已 strip symbols，这里再清一遍）
+          "$NDK_BIN/llvm-strip" "$BIN"
+
+          echo "Binary size: $(du -h "$BIN" | cut -f1)"
+          file "$BIN"
+
+          # 组织发布包
+          mkdir -p dist/${{ matrix.artifact }}
+          cp "$BIN" dist/${{ matrix.artifact }}/iptv
+          cp README.md dist/${{ matrix.artifact }}/README.md
+          cp LICENSE* dist/${{ matrix.artifact }}/ 2>/dev/null || true
+
+          # 使用 zip 打包，便于 Android 7.1 上的文件管理器解压
+          cd dist
+          zip -r ${{ matrix.artifact }}.zip ${{ matrix.artifact }}
+          cd ..
+
+      - name: Show build result
+        run: ls -lh dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}.zip
+          retention-days: 30
+
+  # 打 tag（v*）时自动把二进制附加到 GitHub Release
+  release:
+    name: Attach to GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-android
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Show artifacts
+        run: ls -lhR release-artifacts
+
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false

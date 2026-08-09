@@ -3,14 +3,21 @@ name = "iptv-speed-tester"
 version = "3.0.0"
 edition = "2021"
 
+# ── 构建特性 ──────────────────────────────────────────────────────
+# 默认(桌面/Docker): native-tls(OpenSSL)，DNS 使用系统 getaddrinfo，与原行为一致。
+# Android / 静态交叉编译: 使用 `--no-default-features --features android`，
+#   采用纯 Rust 的 rustls + webpki 内置根证书，无需交叉编译 OpenSSL。
+[features]
+default = ["native-tls"]
+native-tls = ["reqwest/native-tls"]
+android = ["reqwest/rustls-tls-webpki-roots"]
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-# 关闭rust‑tls，使用系统DNS、系统SSL
+# 关闭默认 TLS，由上层 feature 决定；json / stream 是所有构建都需要的公共能力
 reqwest = { version = "0.11", default-features = false, features = [
     "json",
     "stream",
-    "native-tls",
-    "system-resolver"
 ] }
 
 serde = { version = "1", features = ["derive"] }
