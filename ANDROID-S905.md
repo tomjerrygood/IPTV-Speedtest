@@ -118,5 +118,6 @@ export URL2="http://your-sub-address2.txt"
 |---|---|
 | `sh: /data/iptv: not found` | 确认盒子是 **32 位系统**，使用 armv7 版本；chmod 755 后重试 |
 | `No such file or directory` 却文件存在 | 架构不匹配（如盒子为纯 64 位 Android 9），需使用 aarch64 版本 |
-| 端口被占用 | 换端口：`--port 8080` |
+| 端口被占用（`Address already in use`） | 先杀旧进程再启动：`su -c "pkill -f iptv-speed-tester"`，或换端口 `--port 8080` |
 | 需要联网测速但无外网 | 确认盒子 Wi-Fi/网线连通，DNS 正常 |
+| `Subscribe URLs (1): 1. ` 显示空订阅 | 通过 `--url1 http://...`（或环境变量 `URL1`）传入订阅地址，最多 20 个 |

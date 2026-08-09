@@ -117,7 +117,13 @@ impl Cli {
             .iter()
             .filter_map(|o| o.as_deref().map(str::to_string))
             .collect();
-        urls.push(DEFAULT_SUB_URL.to_string());
+        // 内置默认订阅（若非空）
+        let default_url = DEFAULT_SUB_URL.trim();
+        if !default_url.is_empty() {
+            urls.push(default_url.to_string());
+        }
+        // 过滤空串，避免对空地址发起订阅请求
+        urls.retain(|u| !u.trim().is_empty());
         urls
     }
 }
@@ -267,8 +273,23 @@ async fn main() {
 
     let addr = format!("0.0.0.0:{}", cli.port);
     println!("[main] listening on http://{}", addr);
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!(
+                "[error] failed to bind {}: {}",
+                addr, e
+            );
+            eprintln!("[error] the port may already be in use by another instance.");
+            eprintln!("[error] fix: kill the old process (pkill -f iptv-speed-tester)");
+            eprintln!("[error]   or start with a different port: --port <PORT>");
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = axum::serve(listener, app).await {
+        eprintln!("[error] server error: {}", e);
+        std::process::exit(1);
+    }
 }
 
 /// 读取文件最后修改时间，格式化为本地时间字符串
