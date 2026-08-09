@@ -308,6 +308,8 @@ pub async fn run_api_speed_tests(
 
     print_progress(0, total, 0);
 
+    // 在任务内捕获一次阈值，避免并发下重复读取
+    let low = speed_low();
     let mut handles = vec![];
     for item in items {
         let sem = sem.clone();
@@ -335,13 +337,13 @@ pub async fn run_api_speed_tests(
             }
             let (speed, _) = test_api_host_speed(&host, &mt, false).await;
             let c = completed.fetch_add(1, Ordering::Relaxed) + 1;
-            let v = if speed >= SPEED_LOW {
+            let v = if speed >= low {
                 valid.fetch_add(1, Ordering::Relaxed) + 1
             } else {
                 valid.load(Ordering::Relaxed)
             };
             print_progress(c, total, v);
-            if speed >= SPEED_LOW {
+            if speed >= low {
                 Some(SourceResult {
                     host,
                     match_type: mt,
@@ -408,6 +410,8 @@ pub async fn test_subscribe_hosts(
 
     print_progress(0, total, 0);
 
+    // 在任务内捕获一次阈值，避免并发下重复读取
+    let low = speed_low();
     let mut handles = vec![];
     for (hk, ch) in host_channels {
         let sem = sem.clone();
@@ -418,7 +422,7 @@ pub async fn test_subscribe_hosts(
             let _permit = sem.acquire().await.unwrap();
             let speed = test_one_subscribe_url(&url).await;
             let c = completed.fetch_add(1, Ordering::Relaxed) + 1;
-            let v = if speed >= SPEED_LOW {
+            let v = if speed >= low {
                 valid.fetch_add(1, Ordering::Relaxed) + 1
             } else {
                 valid.load(Ordering::Relaxed)
@@ -432,7 +436,7 @@ pub async fn test_subscribe_hosts(
     let mut speeds = HashMap::new();
     for h in handles {
         if let Ok((hk, spd)) = h.await {
-            speeds.insert(hk, if spd < SPEED_LOW { -1.0 } else { spd });
+            speeds.insert(hk, if spd < low { -1.0 } else { spd });
         }
     }
     println!();

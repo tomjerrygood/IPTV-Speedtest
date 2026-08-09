@@ -1,7 +1,7 @@
 use crate::channel::{
     build_m3u8_entry, clean_channel_name, get_standard_channel_map, map_to_standard_name,
 };
-use crate::config::{API_URL, HSMD_ADDRESS_LIST_FILE, SPEED_LOW};
+use crate::config::{speed_low, API_URL, HSMD_ADDRESS_LIST_FILE};
 use crate::output::build_and_write;
 use crate::speedtest::{fetch_channels_for_source, run_api_speed_tests, test_subscribe_hosts};
 use crate::subscribe::{download_subscribes, host_key, parse_subscribe_file};
@@ -90,11 +90,12 @@ pub async fn run_task(
         );
         let host_speeds = test_subscribe_hosts(&channels, workers).await;
 
+        let low = speed_low();
         let mut added = 0usize;
         for ch in &channels {
             let hk = host_key(&ch.url);
             let spd = match host_speeds.get(&hk) {
-                Some(&s) if s >= SPEED_LOW => s,
+                Some(&s) if s >= low => s,
                 _ => continue,
             };
             let name = map_to_standard_name(&clean_channel_name(&ch.name), &std_map).to_string();

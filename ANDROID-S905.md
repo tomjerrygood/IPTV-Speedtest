@@ -55,10 +55,12 @@ cp /data/local/tmp/iptv /data/iptv
 chmod 755 /data/iptv
 
 # 3. 运行（默认端口 3030，每天 03:23 自动测速）
-/data/iptv --port 3030 --workers 20 --top 5 --cron "23 3 * * *" --timezone Asia/Shanghai
+#    舍弃速率低于 5MB/s 的节目（--speed-low 默认即 5.0，可调）
+/data/iptv --port 3030 --workers 20 --top 5 --cron "23 3 * * *" --timezone Asia/Shanghai --speed-low 5.0
 ```
 
 > 盒子 CPU 较弱，建议 `--workers` 保持 10~20，避免过载。
+> `--speed-low <MB/s>` 设置最低速率阈值：测速后低于该值的节目会被舍弃。例如只要 ≥3MB/s 源：`--speed-low 3.0`；只要超清源：`--speed-low 10.0`。
 
 ### 开机自启（可选）
 
@@ -121,3 +123,4 @@ export URL2="http://your-sub-address2.txt"
 | 端口被占用（`Address already in use`） | 先杀旧进程再启动：`su -c "pkill -f iptv-speed-tester"`，或换端口 `--port 8080` |
 | 需要联网测速但无外网 | 确认盒子 Wi-Fi/网线连通，DNS 正常 |
 | `Subscribe URLs (1): 1. ` 显示空订阅 | 通过 `--url1 http://...`（或环境变量 `URL1`）传入订阅地址，最多 20 个 |
+| 想要更严/更松的速率筛选 | 调高/调低 `--speed-low`：`--speed-low 10.0` 只要 ≥10MB/s；`--speed-low 1.0` 保留 ≥1MB/s |

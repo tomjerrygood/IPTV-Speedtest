@@ -24,7 +24,22 @@ pub const HSMDTV_TEST_URI: &str = "/newlive/live/hls/1/live.m3u8";
 // 速度分级 (MB/s)
 pub const SPEED_HIGH: f64 = 5.0;
 pub const SPEED_MID: f64 = 1.0;
-pub const SPEED_LOW: f64 = 0.5;
+
+// 最低速率阈值默认值 (MB/s)：低于此值的源/节目会被舍弃
+pub const DEFAULT_SPEED_LOW: f64 = 5.0;
+
+// 最低速率阈值 (MB/s)，由 CLI 参数 --speed-low 设置，运行前初始化一次
+static SPEED_LOW: OnceLock<f64> = OnceLock::new();
+
+/// 初始化最低速率阈值，main() 解析参数后调用一次
+pub fn init_speed_low(v: f64) {
+    let _ = SPEED_LOW.set(v);
+}
+
+/// 当前最低速率阈值 (MB/s)
+pub fn speed_low() -> f64 {
+    *SPEED_LOW.get().unwrap_or(&DEFAULT_SPEED_LOW)
+}
 
 // 超时 / 批次
 pub const HOST_TIMEOUT: Duration = Duration::from_secs(15);
