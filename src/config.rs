@@ -15,10 +15,7 @@ pub const API_URL: &str = "https://iptvs.pes.im";
 pub const EPG_URL: &str = "https://epg.zsdc.eu.org/t.xml";
 pub const LOGO_BASE_URL: &str =
     "https://ghfast.top/https://raw.githubusercontent.com/Jarrey/iptv_logo/main/tv/";
-#pub const DEFAULT_SUB_URL: &str =
-#    "http://gh-proxy.com/raw.githubusercontent.com/suxuang/myIPTV/main/ipv4.m3u";
-pub const DEFAULT_SUB_URL: &str =
-    "";
+pub const DEFAULT_SUB_URL: &str = "";
 
 // IPTV 类型路径
 pub const ZHGXTV_INTERFACE: &str = "/ZHGXTV/Public/json/live_interface.txt";
