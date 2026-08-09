@@ -44,6 +44,15 @@ jobs:
           workspaces: '. -> target'
 
       - name: Build release binary for ${{ matrix.target }}
+        env:
+          # .cargo/config.toml 中的 linker 通过 PATH 查找（由 setup-ndk 的 add-to-path 提供）
+          # C 编译器环境变量（cc-rs 约定: CC_<大写target>/AR_<大写target>），
+          # 供 ring 等含 C/汇编代码的依赖交叉编译使用。
+          # 每个矩阵 job 只构建一个 target，因此冗余的另一个目标变量不会生效。
+          CC_armv7_linux_androideabi: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang
+          AR_armv7_linux_androideabi: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
+          CC_aarch64_linux_android: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang
+          AR_aarch64_linux_android: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
         run: |
           set -euo pipefail
           NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"

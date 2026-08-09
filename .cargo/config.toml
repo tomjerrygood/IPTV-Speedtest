@@ -1,11 +1,14 @@
-# 交叉编译 Android (S905) 工具链配置
+# 交叉编译 Android (S905) 链接器配置
 #
 # 前置: Android NDK 的 llvm 工具链目录在 PATH 中，例如:
 #   export PATH=$PATH:$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
 # (GitHub Actions 中由 nttld/setup-ndk 的 add-to-path 自动完成)
 #
-# cc/ar 用于编译 C 依赖(如 ring 的汇编与 C 代码)，
-# linker 用于最终链接。三者均指向 NDK r26d 的 clang (minSdk 24)。
+# 注意: cargo 的 [target.<triple>] 表只支持 linker/rustflags/runner 等键，
+# C 编译器(cc-rs, 用于编译 ring 等 C 依赖)必须通过环境变量指定:
+#   CC_armv7_linux_androideabi / AR_armv7_linux_androideabi
+#   CC_aarch64_linux_android / AR_aarch64_linux_android
+# (见 .github/workflows/build-android.yml 的 env)
 #
 # 构建命令:
 #   cargo build --release --no-default-features --features android \
@@ -15,10 +18,6 @@
 
 [target.armv7-linux-androideabi]
 linker = "armv7a-linux-androideabi24-clang"
-cc     = "armv7a-linux-androideabi24-clang"
-ar     = "llvm-ar"
 
 [target.aarch64-linux-android]
 linker = "aarch64-linux-android24-clang"
-cc     = "aarch64-linux-android24-clang"
-ar     = "llvm-ar"
