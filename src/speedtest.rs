@@ -429,33 +429,71 @@ fn find_start_code(buf: &[u8], from: usize) -> Option<(usize, usize)> {
     None
 }
 
+/// 从单行 STREAM-INF 中解析 RESOLUTION=WxH
+fn parse_resolution_from_line(line: &str) -> Option<(u32, u32)> {
+    let idx = line.find("RESOLUTION=")?;
+    let after = &line[idx + "RESOLUTION=".len()..];
+    let value: String = after
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == 'x')
+        .collect();
+    let mut it = value.splitn(2, 'x');
+    Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?))
+}
+
 /// 解析 master playlist 的 RESOLUTION 属性，返回最大档位
 fn parse_master_resolution(body: &str) -> Option<(u32, u32)> {
-    let mut best: Option<(u32, u32)> = None;
-    for line in body.lines() {
-        if !line.contains("RESOLUTION=") {
+    body.lines()
+        .filter_map(parse_resolution_from_line)
+        .max_by_key(|&(w, h)| w * h)
+}
+
+/// 从 master playlist 提取 RESOLUTION 最大档位对应的变体 URL
+fn master_top_variant_url(master_url: &str, body: &str) -> Option<(u32, u32, String)> {
+    let parsed = Url::parse(master_url).ok()?;
+    let origin = format!("{}://{}", parsed.scheme(), parsed.host_str()?);
+    let base = &master_url[..master_url.rfind('/')? + 1];
+    let lines: Vec<&str> = body.lines().collect();
+    let mut best: Option<(usize, u32, u32)> = None;
+    for (i, line) in lines.iter().enumerate() {
+        if !line.contains("#EXT-X-STREAM-INF") {
             continue;
         }
-        let Some(idx) = line.find("RESOLUTION=") else {
-            continue;
-        };
-        let after = &line[idx + "RESOLUTION=".len()..];
-        let value: String = after
-            .chars()
-            .take_while(|c| c.is_ascii_digit() || *c == 'x')
-            .collect();
-        let mut it = value.splitn(2, 'x');
-        let (Ok(w), Ok(h)) = (
-            it.next().unwrap_or("").parse::<u32>(),
-            it.next().unwrap_or("").parse::<u32>(),
-        ) else {
-            continue;
-        };
-        if best.is_none() || w * h > best.unwrap().0 * best.unwrap().1 {
-            best = Some((w, h));
+        if let Some((w, h)) = parse_resolution_from_line(line) {
+            if best.map_or(true, |(_, bw, bh)| (w * h) > (bw * bh)) {
+                best = Some((i, w, h));
+            }
         }
     }
-    best
+    let (li, w, h) = best?;
+    let vline = lines.get(li + 1)?.trim();
+    if vline.is_empty() || vline.starts_with('#') {
+        return None;
+    }
+    let vurl = if vline.starts_with("http") {
+        vline.to_string()
+    } else if vline.starts_with('/') {
+        format!("{}{}", origin, vline)
+    } else {
+        format!("{}{}", base, vline)
+    };
+    Some((w, h, vurl))
+}
+
+/// 对 media playlist 变体 URL：GET 后解析第一个 TS 分片 SPS（验证真实可播）
+async fn probe_variant_sps(variant_url: &str) -> Option<(u32, u32)> {
+    let client = make_client(Duration::from_secs(4));
+    let resp = client.get(variant_url).send().await.ok()?;
+    if resp.status() != 200 {
+        return None;
+    }
+    let body = resp.text().await.ok()?;
+    if body.contains("#EXT-X-STREAM-INF") {
+        // 变体又套 master（少见）：递归取最高档
+        let (_, _, v2) = master_top_variant_url(variant_url, &body)?;
+        return probe_variant_sps(v2).await;
+    }
+    probe_resolution_from_ts(variant_url, &body).await
 }
 
 /// 解析单码率 media playlist：下载 TS 分片，做 TS 解复用后解析 H.264 SPS 获取真实分辨率
@@ -618,12 +656,66 @@ pub async fn probe_resolution(url: &str) -> Option<(u32, u32)> {
     }
     let body = resp.text().await.ok()?;
 
-    // 1) master playlist：直接取 RESOLUTION 属性
+    // 1) master playlist：取最大分辨率变体并下载其 TS 分片验证真实可播（SPS 解析成功才算有效内容）
     if body.contains("#EXT-X-STREAM-INF") {
-        return parse_master_resolution(&body);
+        let (w, h, vurl) = master_top_variant_url(url, &body)?;
+        return probe_variant_sps(&vurl).await.filter(|&(rw, rh)| {
+            // 变体 SPS 实测分辨率与属性一致（允许 16 像素倍差取整误差）
+            let ok = rw <= w + 16 && rh <= h + 16 && rw >= w.saturating_sub(16) && rh >= h.saturating_sub(16);
+            if !ok {
+                println!("[probe] variant {}x{} declared vs {}x{} actual — reject", w, h, rw, rh);
+            }
+            ok
+        });
     }
     // 2) 单码率 media playlist：解析 TS 分片 SPS
     probe_resolution_from_ts(url, &body).await
+}
+
+/// 直链（flv/ts/mp4 等非 HLS）快速有效性验证：下载前 256KB，确认返回真实媒体数据
+async fn probe_direct_stream(url: &str) -> Option<(u32, u32)> {
+    use futures_util::StreamExt;
+
+    let client = make_client(Duration::from_secs(6));
+    let resp = client.get(url).send().await.ok()?;
+    if resp.status() >= reqwest::StatusCode::BAD_REQUEST {
+        return None;
+    }
+    let mut buf = Vec::with_capacity(256 * 1024);
+    let mut stream = resp.bytes_stream();
+    while buf.len() < 256 * 1024 {
+        match tokio::time::timeout(Duration::from_secs(3), stream.next()).await {
+            Ok(Some(Ok(chunk))) => buf.extend_from_slice(&chunk),
+            _ => break,
+        }
+    }
+    if buf.is_empty() {
+        return None;
+    }
+    // HTTP 200 但返回 HTML/XML 错误页 → 无效源
+    if buf[0] == b'<' {
+        return None;
+    }
+    let lower = url.to_lowercase();
+    if lower.ends_with(".flv") || buf.starts_with(b"FLV") || lower.ends_with(".ts") {
+        return Some((0, 0)); // 有效媒体直链，分辨率未知
+    }
+    // 其他直链：收到 ≥64KB 非页面数据视为有效流
+    if buf.len() >= 64 * 1024 {
+        return Some((0, 0));
+    }
+    None
+}
+
+/// 探测节目流有效性 + 真实分辨率。
+/// - HLS：解析 TS 分片 SPS 精确认证（同时验证真实可播），返回 (宽, 高)
+/// - 非 HLS 直链：有效性验证通过返回 (0, 0)（分辨率未知），死链/错误页返回 None
+pub async fn probe_stream(url: &str) -> Option<(u32, u32)> {
+    let lower = url.to_lowercase();
+    if lower.contains(".m3u8") || lower.contains("/hls/") || lower.contains("/live/") {
+        return probe_resolution(url).await;
+    }
+    probe_direct_stream(url).await
 }
 
 // ── 公开接口 ──────────────────────────────────────────────────────

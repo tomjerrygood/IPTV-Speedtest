@@ -244,11 +244,11 @@ fn build_entries(
 static RE_URL: Lazy<Regex> = Lazy::new(|| Regex::new(r"(http://[^\s]+)").unwrap());
 static RE_ID: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*\d+\s+").unwrap());
 
-/// 按最低分辨率过滤节目：仅保留分辨率高度 >= min_h 的节目。
-/// - HLS 源探测失败（master 无 RESOLUTION 属性且 TS SPS 解析失败）即剔除
-/// - 非 HLS 直链（flv/ts）源信息中无分辨率字段，默认保留
+/// 按最低分辨率过滤节目 + 流有效性验证：
+/// - HLS 源：SPS 实测分辨率 >= min_h 才保留，解析失败/不可播即剔除
+/// - 非 HLS 直链：收到有效媒体数据即保留（(0,0) 分辨率未知），死链/错误页剔除
 async fn filter_entries_by_resolution(entries: Vec<Entry>, min_h: u32) -> Vec<Entry> {
-    use crate::speedtest::probe_resolution;
+    use crate::speedtest::probe_stream;
 
     let total = entries.len();
     let sem = Arc::new(Semaphore::new(32));
@@ -260,7 +260,7 @@ async fn filter_entries_by_resolution(entries: Vec<Entry>, min_h: u32) -> Vec<En
             i,
             tokio::spawn(async move {
                 let _permit = sem.acquire().await.unwrap();
-                probe_resolution(&url).await
+                probe_stream(&url).await
             }),
         ));
     }
@@ -268,20 +268,16 @@ async fn filter_entries_by_resolution(entries: Vec<Entry>, min_h: u32) -> Vec<En
     let mut kept = Vec::with_capacity(total);
     let mut dropped = 0usize;
     for (i, h) in handles {
-        let is_hls = {
-            let u = entries[i].url.to_lowercase();
-            u.contains(".m3u8") || u.contains("/hls/") || u.contains("/live/")
-        };
         match h.await.ok().flatten() {
-            Some((_w, hgt)) if hgt < min_h => dropped += 1,
+            Some((0, 0)) => kept.push(entries[i].clone()), // 有效直链，分辨率未知，保留
+            Some((_w, hgt)) if hgt > 0 && hgt < min_h => dropped += 1,
             Some(_) => kept.push(entries[i].clone()), // 分辨率达标
-            None if is_hls => dropped += 1,            // HLS 源探测失败，严格剔除
-            None => kept.push(entries[i].clone()),     // 非 HLS 直链无分辨率字段，保留
+            None => dropped += 1, // 探测失败（HLS SPS 解析失败 / 直链死链或错误页）→ 一律剔除
         }
     }
     let _ = total;
     println!(
-        "[task] resolution probe done: kept {} / dropped {}",
+        "[task] stream probe done: kept {} / dropped {}",
         kept.len(),
         dropped
     );

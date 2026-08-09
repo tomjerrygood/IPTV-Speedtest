@@ -1,4 +1,4 @@
-use crate::channel::{base_group, channel_sort_key};
+use crate::channel::{base_group, build_m3u8_entry, channel_sort_key};
 use crate::config::{data_path, CACHE_M3U8, CACHE_TXT, EPG_URL};
 use crate::types::Entry;
 use std::collections::HashMap;
@@ -28,7 +28,9 @@ pub fn build_and_write(
             .then(a2.cmp(&b2))
     });
 
-    // ── 每个频道去重并按速度从快到慢排序 ────────────────────────
+    // ── 每个频道去重、按速度排序并限制输出源数（最多 3 个）────
+    //     限制源数可避免错频/失效源占满列表，播放器默认选第一个时命中错台概率大降
+    const MAX_PER_CHANNEL: usize = 3;
     for entries in by_name.values_mut() {
         let mut seen = std::collections::HashSet::new();
         entries.retain(|e| seen.insert(e.url.clone()));
@@ -39,6 +41,7 @@ pub fn build_and_write(
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then(a.index.cmp(&b.index))
         });
+        entries.truncate(MAX_PER_CHANNEL);
     }
 
     let ts = update_time.format("%Y-%m-%d %H:%M:%S").to_string();
@@ -58,7 +61,8 @@ pub fn build_and_write(
             }
             if let Some(entries) = by_name.get(name) {
                 for e in entries {
-                    m3u8_lines.push(e.content.clone());
+                    // 现场重建配对行：#EXTINF 与 URL 原子一致，杜绝缓存错位导致台标错乱
+                    m3u8_lines.push(build_m3u8_entry(&e.name, &e.url, e.speed));
                 }
             }
         }
