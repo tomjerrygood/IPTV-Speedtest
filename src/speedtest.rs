@@ -2,7 +2,6 @@ use crate::config::*;
 use crate::types::{Channel, SourceResult};
 use reqwest::Client;
 use serde_json::Value;
-use std::io::Read;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -491,7 +490,7 @@ async fn probe_variant_sps(variant_url: &str) -> Option<(u32, u32)> {
     if body.contains("#EXT-X-STREAM-INF") {
         // 变体又套 master（少见）：递归取最高档
         let (_, _, v2) = master_top_variant_url(variant_url, &body)?;
-        return probe_variant_sps(v2).await;
+        return probe_variant_sps(&v2).await;
     }
     probe_resolution_from_ts(variant_url, &body).await
 }
