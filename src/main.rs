@@ -40,12 +40,12 @@ struct Cli {
     per_channel: usize,
 
     /// 最低速率阈值 (MB/s)，低于此值的节目会被舍弃
-    #[arg(long = "speed-low", env = "SPEED_LOW", default_value_t = 5.0)]
+    #[arg(long = "speed-low", env = "SPEED_LOW", default_value_t = 2.0)]
     speed_low: f64,
 
     /// 最低分辨率（高度像素，如 1080=FHD）：仅保留源信息中分辨率为该值及以上的节目。
     /// 0 = 关闭；源信息中无分辨率的节目默认保留（避免误杀）。
-    #[arg(long = "min-resolution", env = "MIN_RESOLUTION", default_value_t = 0u32)]
+    #[arg(long = "min-resolution", env = "MIN_RESOLUTION", default_value_t = 1080u32)]
     min_resolution: u32,
 
     /// Cron 表达式（5字段: 分 时 日 月 周），例如 "23 3 * * *"

@@ -93,17 +93,17 @@ jobs:
           cp ANDROID-S905.md dist/iptv-speed-tester-armv7/ 2>/dev/null || true
           cp LICENSE* dist/iptv-speed-tester-armv7/ 2>/dev/null || true
 
-          # 使用 zip 打包，便于 Android 7.1 上的文件管理器解压
-          cd dist
-          zip -r iptv-speed-tester-armv7.zip iptv-speed-tester-armv7
-          cd ..
-          ls -lh dist/
+          # 不再手动打 zip：upload-artifact 直接上传目录，
+          # GitHub 侧会打成一枚一级 zip，下载解压后直接得到 iptv 二进制
+          #（避免 v4 先用手打 zip 再被外层再包一次导致两次解压）
+          ls -lhR dist/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: iptv-speed-tester-armv7
-          path: dist/iptv-speed-tester-armv7.zip
+          path: dist/iptv-speed-tester-armv7
+          if-no-files-found: error
           retention-days: 30
 
   # 打 tag（v*）时自动把二进制附加到 GitHub Release
@@ -124,10 +124,19 @@ jobs:
       - name: Show artifacts
         run: ls -lhR release-artifacts
 
+      # artifact 下载已被解压为目录，重新打成一枚一级 zip 供 release 附件
+      - name: Package release zip (single-level)
+        run: |
+          set -euo pipefail
+          cd release-artifacts
+          zip -r iptv-speed-tester-armv7.zip . -x "*.zip"
+          cd ..
+          ls -lh release-artifacts
+
       - name: Create / update release
         uses: softprops/action-gh-release@v2
         with:
-          files: release-artifacts/*.zip
+          files: release-artifacts/iptv-speed-tester-armv7.zip
           generate_release_notes: true
           draft: false
           prerelease: false

@@ -26,7 +26,7 @@ pub const SPEED_HIGH: f64 = 5.0;
 pub const SPEED_MID: f64 = 1.0;
 
 // 最低速率阈值默认值 (MB/s)：低于此值的源/节目会被舍弃
-pub const DEFAULT_SPEED_LOW: f64 = 5.0;
+pub const DEFAULT_SPEED_LOW: f64 = 2.0;
 
 // 最低速率阈值 (MB/s)，由 CLI 参数 --speed-low 设置，运行前初始化一次
 static SPEED_LOW: OnceLock<f64> = OnceLock::new();
@@ -41,8 +41,8 @@ pub fn speed_low() -> f64 {
     *SPEED_LOW.get().unwrap_or(&DEFAULT_SPEED_LOW)
 }
 
-// 最低分辨率阈值默认值（0 = 关闭）
-pub const DEFAULT_MIN_RESOLUTION: u32 = 0;
+// 最低分辨率阈值默认值（高度像素；1080 = FHD）
+pub const DEFAULT_MIN_RESOLUTION: u32 = 1080;
 
 // 最低分辨率阈值（高度像素），由 CLI 参数 --min-resolution 设置，运行前初始化一次
 static MIN_RESOLUTION: OnceLock<u32> = OnceLock::new();
