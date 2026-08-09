@@ -28,9 +28,11 @@ pub fn build_and_write(
             .then(a2.cmp(&b2))
     });
 
-    // ── 每个频道去重、按速度排序并限制输出源数（最多 3 个）────
-    //     限制源数可避免错频/失效源占满列表，播放器默认选第一个时命中错台概率大降
-    const MAX_PER_CHANNEL: usize = 3;
+    // ── 每个频道去重、按速度排序并限制输出源数（仅 1 个）──────
+    //     舍弃的源连同其 #EXTINF(台标) 块一并消失，从根上杜绝
+    //     "废弃台标对应下一个节目" 的错位问题；
+    //     保留源均已通过 probe_stream 有效性验证（SPS/直链）
+    const MAX_PER_CHANNEL: usize = 1;
     for entries in by_name.values_mut() {
         let mut seen = std::collections::HashSet::new();
         entries.retain(|e| seen.insert(e.url.clone()));
@@ -71,7 +73,9 @@ pub fn build_and_write(
         "#EXTINF:-1 group-title=\"更新时间\",{}\n{}",
         dummy_name, DUMMY_URL
     ));
-    let m3u8 = m3u8_lines.join("\n");
+    // 每个块均为 "#EXTINF…\nURL"，块间换行连接并以尾随换行收尾，
+    // 保证播放器端 #EXTINF(台标) 与 URL 逐行成对解析
+    let m3u8 = m3u8_lines.join("\n") + "\n";
     let _ = fs::write(data_path(CACHE_M3U8), &m3u8);
 
     // ── TXT ──────────────────────────────────────────────────────
