@@ -480,19 +480,21 @@ fn master_top_variant_url(master_url: &str, body: &str) -> Option<(u32, u32, Str
 }
 
 /// 对 media playlist 变体 URL：GET 后解析第一个 TS 分片 SPS（验证真实可播）
-async fn probe_variant_sps(variant_url: &str) -> Option<(u32, u32)> {
-    let client = make_client(Duration::from_secs(4));
-    let resp = client.get(variant_url).send().await.ok()?;
-    if resp.status() != 200 {
-        return None;
+/// 变体若又套 master（嵌套罕见），循环取最高档，避免 async 递归（E0733）
+async fn probe_variant_sps(mut variant_url: String) -> Option<(u32, u32)> {
+    loop {
+        let client = make_client(Duration::from_secs(4));
+        let resp = client.get(&variant_url).send().await.ok()?;
+        if resp.status() != 200 {
+            return None;
+        }
+        let body = resp.text().await.ok()?;
+        if !body.contains("#EXT-X-STREAM-INF") {
+            return probe_resolution_from_ts(&variant_url, &body).await;
+        }
+        let (_, _, v2) = master_top_variant_url(&variant_url, &body)?;
+        variant_url = v2;
     }
-    let body = resp.text().await.ok()?;
-    if body.contains("#EXT-X-STREAM-INF") {
-        // 变体又套 master（少见）：递归取最高档
-        let (_, _, v2) = master_top_variant_url(variant_url, &body)?;
-        return probe_variant_sps(&v2).await;
-    }
-    probe_resolution_from_ts(variant_url, &body).await
 }
 
 /// 解析单码率 media playlist：下载 TS 分片，做 TS 解复用后解析 H.264 SPS 获取真实分辨率
@@ -658,7 +660,7 @@ pub async fn probe_resolution(url: &str) -> Option<(u32, u32)> {
     // 1) master playlist：取最大分辨率变体并下载其 TS 分片验证真实可播（SPS 解析成功才算有效内容）
     if body.contains("#EXT-X-STREAM-INF") {
         let (w, h, vurl) = master_top_variant_url(url, &body)?;
-        return probe_variant_sps(&vurl).await.filter(|&(rw, rh)| {
+        return probe_variant_sps(vurl).await.filter(|&(rw, rh)| {
             // 变体 SPS 实测分辨率与属性一致（允许 16 像素倍差取整误差）
             let ok = rw <= w + 16 && rh <= h + 16 && rw >= w.saturating_sub(16) && rh >= h.saturating_sub(16);
             if !ok {
