@@ -12,3 +12,8 @@ iptv_sources.txt
 Thumbs.db
 .idea/
 .vscode/
+
+target/
+*.log
+Cargo.lock
+

@@ -1,23 +1,19 @@
-# 交叉编译 Android (S905) 链接器配置
+# 交叉编译 Android (S905, 32 位) 链接器配置
 #
 # 前置: Android NDK 的 llvm 工具链目录在 PATH 中，例如:
 #   export PATH=$PATH:$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
 # (GitHub Actions 中由 nttld/setup-ndk 的 add-to-path 自动完成)
 #
-# 注意: cargo 的 [target.<triple>] 表只支持 linker/rustflags/runner 等键，
-# C 编译器(cc-rs, 用于编译 ring 等 C 依赖)必须通过环境变量指定:
-#   CC_armv7_linux_androideabi / AR_armv7_linux_androideabi
-#   CC_aarch64_linux_android / AR_aarch64_linux_android
-# (见 .github/workflows/build-android.yml 的 env)
+# 注意:
+#   - cargo 的 [target.<triple>] 表只支持 linker/rustflags/runner 等键，不支持 cc/ar。
+#   - C 编译器(cc-rs, 用于编译 ring 等 C/汇编依赖)必须通过环境变量在运行时设置:
+#       export CC_armv7_linux_androideabi="$NDK_BIN/armv7a-linux-androideabi24-clang"
+#       export AR_armv7_linux_androideabi="$NDK_BIN/llvm-ar"
+#     (见 .github/workflows/build-android.yml，在 run 脚本中动态读取 $ANDROID_NDK_HOME)
 #
 # 构建命令:
 #   cargo build --release --no-default-features --features android \
-#       --target armv7-linux-androideabi      # 32 位 (Android 7.1-9.0 / S905)
-#   cargo build --release --no-default-features --features android \
-#       --target aarch64-linux-android        # 64 位 (Android 9 / S905)
+#       --target armv7-linux-androideabi       # 32 位 (Android 7.1-9.0 / S905)
 
 [target.armv7-linux-androideabi]
 linker = "armv7a-linux-androideabi24-clang"
-
-[target.aarch64-linux-android]
-linker = "aarch64-linux-android24-clang"

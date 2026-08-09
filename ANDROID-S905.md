@@ -1,17 +1,16 @@
 # S905 盒子 (Android 7.1 ~ 9.0) 部署指南
 
-本仓库的 GitHub Actions 会将本项目交叉编译为可在 S905 系列电视盒 Android 系统上直接运行的 ELF 可执行文件。
+本仓库的 GitHub Actions 会将本项目交叉编译为可在 S905 系列电视盒 Android **32 位**系统上直接运行的 ELF 可执行文件。
 
 ---
 
-## 支持的架构
+## 构建产物
 
-| 产物 | 架构 | 适用系统 |
+| 产物 | 架构 | 说明 |
 |---|---|---|
-| `iptv-speed-tester-armv7` | **armv7 (32-bit)** | S905 盒子 Android 7.1 / 8.1 / 9.0（绝大多数盒子的默认 32 位系统）|
-| `iptv-speed-tester-arm64` | **arm64 (64-bit)** | 刷了 64 位 Android 9 的 S905 盒子 |
+| `iptv-speed-tester-armv7.zip` | **armv7 (32-bit)** | S905 盒子 Android 7.1 / 8.1 / 9.0（绝大多数盒子的默认 32 位系统）|
 
-> 32 位版（armv7）几乎兼容所有 S905 盒子，始终优先选择它。
+> S905 盒子出厂系统绝大多数为 32 位，armv7 版即通用选择。
 
 ---
 
@@ -21,7 +20,7 @@
 
 1. 打开仓库页面 → **Actions** → 左侧选择 **Build Android (S905)**
 2. 点击 **Run workflow** → 选择分支 → **Run**
-3. 等待构建完成（约 10~15 分钟），在 **Artifacts** 区域下载对应 zip
+3. 等待构建完成（约 10~15 分钟），在 **Artifacts** 区域下载 `iptv-speed-tester-armv7.zip`
 
 ### 方式二：打 tag 自动发布
 
@@ -63,7 +62,7 @@ chmod 755 /data/iptv
 
 ### 开机自启（可选）
 
-`/data/iptv` 目录下创建启动脚本 `start_iptv.sh`：
+`/data` 目录下创建启动脚本 `start_iptv.sh`：
 
 ```sh
 #!/system/bin/sh
@@ -117,7 +116,7 @@ export URL2="http://your-sub-address2.txt"
 
 | 现象 | 解决 |
 |---|---|
-| `sh: /data/iptv: not found` | 确认盒子是 **32 位系统**，下载 armv7 版本；chmod 755 后重试 |
-| `No such file or directory` 却文件存在 | 架构不匹配（32/64 位），换对应版本 |
+| `sh: /data/iptv: not found` | 确认盒子是 **32 位系统**，使用 armv7 版本；chmod 755 后重试 |
+| `No such file or directory` 却文件存在 | 架构不匹配（如盒子为纯 64 位 Android 9），需使用 aarch64 版本 |
 | 端口被占用 | 换端口：`--port 8080` |
 | 需要联网测速但无外网 | 确认盒子 Wi-Fi/网线连通，DNS 正常 |
