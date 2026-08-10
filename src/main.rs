@@ -21,7 +21,20 @@ use tokio::sync::RwLock;
 // ── CLI 参数 ──────────────────────────────────────────────────────
 
 #[derive(Parser, Debug)]
-#[command(version = VERSION, about = "IPTV Speed Tester & Aggregator")]
+#[command(
+    version = VERSION,
+    about = "IPTV Speed Tester & Aggregator — 自动聚合、测速、过滤 IPTV 源，输出 M3U8/TXT 播放列表",
+    long_about = "IPTV 聚合测速工具：\n\
+      1. 从 API 接口获取公共 IPTV 主机并并发测速\n\
+      2. 导入自定义订阅源（M3U/TXT，最多 20 个）\n\
+      3. 按速率/分辨率过滤，每频道保留最快的 N 个源（--per-channel，来自不同主机）\n\
+      4. 通过 HTTP 接口 (/iptv、/txt、/status、/retest) 提供播放列表\n\
+      5. 支持 cron 定时测速（默认每天 03:23 上海时间）\n\n\
+      全部参数既可用命令行标志，也可用环境变量设置：\n\
+      --port 3030  --workers 20  --top 5  --per-channel 3\n\
+      --speed-low 1.0  --min-resolution 1080  --cron \"23 3 * * *\"  --timezone Asia/Shanghai\n\
+      订阅示例：--url1 http://xxx.m3u --url2 http://yyy.txt"
+)]
 struct Cli {
     /// HTTP 监听端口
     #[arg(long, env = "PORT", default_value_t = 3030)]
