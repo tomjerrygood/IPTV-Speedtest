@@ -16,7 +16,7 @@
 #     .\build_android.ps1 -NdkPath "D:\Android\ndk\26.3.11579264"
 #
 # 产物:
-#   dist\iptv-speed-tester-armv7\iptv  (可 push 到 S905 盒子)
+#   dist\iptv-speed-tester-armv7\iptv-speed-testHD  (可 push 到 S905 盒子)
 # ============================================================
 
 param(
@@ -110,7 +110,7 @@ if (-not (Test-Path $bin)) { $bin = "target\armv7-linux-androideabi\release\iptv
 Write-Host "[完成] 组织发布包..."
 $out = "dist\iptv-speed-tester-armv7"
 New-Item -ItemType Directory -Force -Path $out | Out-Null
-Copy-Item $bin (Join-Path $out "iptv") -Force
+Copy-Item $bin (Join-Path $out "iptv-speed-testHD") -Force
 Copy-Item README.md (Join-Path $out "README.md") -Force
 if (Test-Path ANDROID-S905.md) { Copy-Item ANDROID-S905.md (Join-Path $out "ANDROID-S905.md") -Force }
 
@@ -120,9 +120,9 @@ Compress-Archive -Path $out -DestinationPath $zip -Force
 
 Write-Host ""
 Write-Host "构建成功! 产物:" -ForegroundColor Green
-Write-Host "  二进制: $out\iptv"
+Write-Host "  二进制: $out\iptv-speed-testHD"
 Write-Host "  压缩包: $zip"
 Write-Host ""
 Write-Host "推送到盒子:" -ForegroundColor Cyan
-Write-Host "  adb push $out\iptv /data/local/tmp/iptv"
-Write-Host "  adb shell su -c 'chmod 755 /data/local/tmp/iptv && /data/local/tmp/iptv --port 3030'"
+Write-Host "  adb push $out\iptv-speed-testHD /data/local/tmp/iptv-speed-testHD"
+Write-Host "  adb shell su -c 'chmod 755 /data/local/tmp/iptv-speed-testHD && /data/local/tmp/iptv-speed-testHD --port 3030'"

@@ -87,12 +87,26 @@ jobs:
           echo "Binary size: $(du -h "$BIN" | cut -f1)"
           file "$BIN"
 
-          # 组织发布包
+          # 组织发布包（二进制命名为 iptv-speed-testHD；zip/artifact 名保持 armv7 不变）
           mkdir -p dist/iptv-speed-tester-armv7
-          cp "$BIN" dist/iptv-speed-tester-armv7/iptv
+          cp "$BIN" dist/iptv-speed-tester-armv7/iptv-speed-testHD
           cp README.md dist/iptv-speed-tester-armv7/README.md
           cp ANDROID-S905.md dist/iptv-speed-tester-armv7/ 2>/dev/null || true
           cp LICENSE* dist/iptv-speed-tester-armv7/ 2>/dev/null || true
+
+          # ── UPX 压缩，减小体积（整个阶段容错，任何失败都不阻断构建）──
+          # 部分 Android 环境下 UPX 壳可能不被接受，保留未压缩二进制作回退
+          if curl -fL -o upx.tar.xz "https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-amd64_linux.tar.xz" \
+             && tar -xJf upx.tar.xz \
+             && chmod +x upx-4.2.4-amd64_linux/upx; then
+            if upx-4.2.4-amd64_linux/upx --best --lzma dist/iptv-speed-tester-armv7/iptv-speed-testHD; then
+              echo "UPX compressed OK"
+            else
+              echo "::warning::UPX compression failed, keeping uncompressed binary"
+            fi
+          else
+            echo "::warning::UPX download/extract failed, keeping uncompressed binary"
+          fi
 
           # GitHub runner 时区为 UTC，将文件 mtime 调 +8h，
           # 使 zip 时间字段显示为上海本地时间（盒子上解压不再差 8 小时）

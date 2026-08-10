@@ -9,6 +9,7 @@
 | 产物 | 架构 | 说明 |
 |---|---|---|
 | `iptv-speed-tester-armv7.zip` | **armv7 (32-bit)** | S905 盒子 Android 7.1 / 8.1 / 9.0（绝大多数盒子的默认 32 位系统）|
+| 解压后二进制 | `iptv-speed-testHD` | 已用 UPX 压缩减小体积；若你的盒子环境无法运行 UPX 壳，请用本地未压缩构建 |
 
 > S905 盒子出厂系统绝大多数为 32 位，armv7 版即通用选择。
 
@@ -39,30 +40,32 @@ git push origin v3.0.0
 
 - 盒子已 **root**（可用 Magisk / 当贝 / 潜龙等方案）
 - 安装一个终端模拟器（推荐 **Termux**、**MT管理器** 或 **Terminal Emulator**）
-- 使用 `adb` 或 U 盘将 zip 解压后的 `iptv` 文件拷入盒子
+- 使用 `adb` 或 U 盘将 zip 解压后的 `iptv-speed-testHD` 文件拷入盒子
 
 ### 步骤
 
 ```bash
-# 1. 将 iptv 推送至 /data/local/tmp（adb 方式）
-adb push iptv /data/local/tmp/iptv
+# 1. 将 iptv-speed-testHD 推送至 /data/local/tmp（adb 方式）
+adb push iptv-speed-testHD /data/local/tmp/iptv-speed-testHD
 adb shell
 
 # 2. 赋予执行权限（在盒子 shell 中）
 su
 mount -o remount,rw /system
-cp /data/local/tmp/iptv /data/iptv
-chmod 755 /data/iptv
+cp /data/local/tmp/iptv-speed-testHD /data/iptv-speed-testHD
+chmod 755 /data/iptv-speed-testHD
 
 # 3. 运行（默认端口 3030，每天 03:23 自动测速）
-#    舍弃速率低于 5MB/s 的节目（--speed-low 默认即 5.0，可调）
-#    舍弃低于 FHD(1080p) 的节目（--min-resolution 1080，可选）
-/data/iptv --port 3030 --workers 20 --top 5 --cron "23 3 * * *" --timezone Asia/Shanghai --speed-low 5.0 --min-resolution 1080
+#    默认值：速率阈值 1MB/s、分辨率 ≥1080p、每频道保留 3 个来自不同主机的源
+#    （均可通过参数调整）
+/data/iptv-speed-testHD --port 3030 --workers 20 --top 5 --cron "23 3 * * *" --timezone Asia/Shanghai
 ```
 
 > 盒子 CPU 较弱，建议 `--workers` 保持 10~20，避免过载。
+> 默认参数（无需指定即为默认）：`--speed-low 1.0`（速率 ≥1MB/s）、`--min-resolution 1080`（仅 FHD 及以上）、`--per-channel 3`（每频道最多 3 个源）。
 > `--speed-low <MB/s>` 设置最低速率阈值：测速后低于该值的节目会被舍弃。例如只要 ≥3MB/s 源：`--speed-low 3.0`；只要超清源：`--speed-low 10.0`。
 > `--min-resolution <高度>` 按分辨率过滤：`1080`=只保留 FHD(1080p) 及以上，`720`=只保留 HD 及以上，`2160`=只保留 4K。分辨率来自 HLS 主播放列表的 `RESOLUTION` 属性；源信息中无分辨率的节目默认保留（避免误杀）。
+> `--per-channel <N>` 每频道最多保留 N 个源（默认 3），且这 N 个源必来自 N 台**不同主机**——某台源不稳/失效时播放器可自动切到其余主机源，避免整台错频导致台标错乱。
 
 ### 开机自启（可选）
 
@@ -70,7 +73,7 @@ chmod 755 /data/iptv
 
 ```sh
 #!/system/bin/sh
-/data/iptv --port 3030 --workers 15 --top 5 --cron "23 3 * * *" --timezone Asia/Shanghai &
+/data/iptv-speed-testHD --port 3030 --workers 15 --top 5 --cron "23 3 * * *" --timezone Asia/Shanghai &
 ```
 
 配合 **Boot Manager / 自启动管理 App** 或 Magisk `service.sh` 实现开机自启。
@@ -110,8 +113,8 @@ sub_cache_*.txt      # 订阅源缓存
 ```sh
 export URL1="http://your-sub-address1.m3u"
 export URL2="http://your-sub-address2.txt"
-/data/iptv --port 3030
-# 等价于 /data/iptv --url1 http://... --url2 http://...
+/data/iptv-speed-testHD --port 3030
+# 等价于 /data/iptv-speed-testHD --url1 http://... --url2 http://...
 ```
 
 ---
@@ -120,7 +123,7 @@ export URL2="http://your-sub-address2.txt"
 
 | 现象 | 解决 |
 |---|---|
-| `sh: /data/iptv: not found` | 确认盒子是 **32 位系统**，使用 armv7 版本；chmod 755 后重试 |
+| `sh: /data/iptv-speed-testHD: not found` | 确认盒子是 **32 位系统**，使用 armv7 版本；chmod 755 后重试 |
 | `No such file or directory` 却文件存在 | 架构不匹配（如盒子为纯 64 位 Android 9），需使用 aarch64 版本 |
 | 端口被占用（`Address already in use`） | 先杀旧进程再启动：`su -c "pkill -f iptv-speed-tester"`，或换端口 `--port 8080` |
 | 需要联网测速但无外网 | 确认盒子 Wi-Fi/网线连通，DNS 正常 |
